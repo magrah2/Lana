@@ -17,7 +17,7 @@ macro bind(def, element)
 end
 
 # ╔═╡ aa000001-0000-0000-0000-000000000000
-using LinearAlgebra, NLsolve, CairoMakie, PlutoUI
+using LinearAlgebra, CairoMakie, PlutoUI
 
 # ╔═╡ aa000002-0000-0000-0000-000000000000
 md"""
@@ -57,20 +57,31 @@ begin
     L_min = norm(A - C1)
     L     = L_min + prebytek_L
 
-    function equations!(F, u)
-        Bx, Bz = u
+    function residuals(Bx, Bz)
         B_loc  = [Bx, 0.0, Bz]
         uBA_l  = (A  - B_loc) / norm(A  - B_loc)
         uBC1_l = (C1 - B_loc) / norm(C1 - B_loc)
-        F[1] = uBA_l[1] + uBC1_l[1]
-        F[2] = norm(A - B_loc) + norm(B_loc - C1) - L
+        f1 = uBA_l[1] + uBC1_l[1]
+        f2 = norm(A - B_loc) + norm(B_loc - C1) - L
+        return f1, f2
     end
 
-    B0  = [(A[1] + Cmid[1]) / 2, (A[3] + Cmid[3]) / 2 - 0.5]
-    sol = nlsolve(equations!, B0, autodiff = :forward)
-    sol.f_converged || @warn "NLsolve nekonvergoval – zkontroluj parametry."
-
-    Bx, Bz = sol.zero
+    # Newton-Raphson – 2×2 system, numerical Jacobian, converges in ~5 iterations
+    Bx = (A[1] + Cmid[1]) / 2
+    Bz = (A[3] + Cmid[3]) / 2 - 0.5
+    let h = 1e-7
+        for _ in 1:50
+            f1, f2 = residuals(Bx, Bz)
+            (abs(f1) < 1e-10 && abs(f2) < 1e-10) && break
+            df1x = (residuals(Bx+h, Bz)[1] - f1) / h
+            df1z = (residuals(Bx, Bz+h)[1] - f1) / h
+            df2x = (residuals(Bx+h, Bz)[2] - f2) / h
+            df2z = (residuals(Bx, Bz+h)[2] - f2) / h
+            det  = df1x*df2z - df1z*df2x
+            Bx  -= ( df2z*f1 - df1z*f2) / det
+            Bz  -= (-df2x*f1 + df1x*f2) / det
+        end
+    end
     B  = [Bx, 0.0, Bz]
 
     uBA  = (A  - B) / norm(A  - B)
